@@ -1,0 +1,106 @@
+name: Build ModEngine Dylib
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # ← penting untuk release
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Select Xcode
+      run: sudo xcode-select -s /Applications/Xcode.app
+
+    - name: Install Theos        # ← FIX: guna git clone, bukan install script
+      run: |
+        git clone --recursive https://github.com/theos/theos.git $HOME/theos
+        curl -LO https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
+        tar -xf iPhoneOS16.5.sdk.tar.xz -C $HOME/theos/sdks
+        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+        echo "$HOME/theos/bin" >> $GITHUB_PATH
+
+    - name: Install ldid
+      run: brew install ldid || true
+
+    - name: Clone ESPFF source
+      run: |
+        git clone --depth 1 https://github.com/Fl0rk/External_ESP_Free_Fire \
+            Sources/ESPFF
+        git clone --depth 1 https://github.com/Fl0rk/ScreenProtectorKit-Spoof \
+            Sources/ScreenProtectorKit
+
+    - name: Prepare
+      run: mkdir -p build
+
+    - name: Compile
+      run: |
+        SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+        ARCH="arm64"
+        CFLAGS="-arch $ARCH -isysroot $SDK -mios-version-min=13.0 -O2 \
+                -fvisibility=hidden -fPIC \
+                -I$HOME/theos/vendor/include \
+                -ISources -ISources/ESPFF -ISources/ScreenProtectorKit \
+                -DSUBSTRATE_AVAILABLE=1"
+        LDFLAGS="-arch $ARCH -isysroot $SDK \
+                 -dynamiclib -install_name @rpath/ModEngine.dylib \
+                 -framework Foundation -framework UIKit -framework CoreGraphics \
+                 -lsubstrate -L$HOME/theos/vendor/lib"
+        clang++ $CFLAGS -x objective-c++ \
+            Sources/ModEngine.mm \
+            Sources/MenuView.mm \
+            Sources/ESPFF/ESPFF.mm \
+            $LDFLAGS \
+            -o build/ModEngine.dylib
+        echo "Build OK"
+
+    - name: Fake-sign
+      run: ldid -S build/ModEngine.dylib || true
+
+    - name: Package
+      run: |
+        mkdir -p Payload/ModEngine.app
+        cp build/ModEngine.dylib Payload/ModEngine.app/
+        cat > Payload/ModEngine.app/Info.plist << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+            <key>CFBundleIdentifier</key><string>com.modengine.ff</string>
+            <key>CFBundleName</key><string>ModEngine</string>
+            <key>CFBundleExecutable</key><string>ModEngine</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>MinimumOSVersion</key><string>13.0</string>
+        </dict></plist>
+        EOF
+        zip -qr ModEngine.zip Payload
+        mv ModEngine.zip ModEngine_OB54.dylib.zip
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ModEngine-OB54
+        path: |
+          build/ModEngine.dylib
+          ModEngine_OB54.dylib.zip
+        retention-days: 7
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: github.ref == 'refs/heads/main'
+      with:
+        tag_name: "OB54-${{ github.run_number }}"
+        name: "ModEngine OB54 Build ${{ github.run_number }}"
+        files: |
+          build/ModEngine.dylib
+          ModEngine_OB54.dylib.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ← FIX: token untuk release
