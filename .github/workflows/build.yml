@@ -37,13 +37,23 @@ jobs:
         brew install ldid
         which ldid
 
-    - name: Clone ESPFF source
-      run: |
-        git clone --depth 1 https://github.com/Fl0rk/External_ESP_Free_Fire \
-            Sources/ESPFF || echo "ESPFF clone failed, skipping"
-        git clone --depth 1 https://github.com/Fl0rk/ScreenProtectorKit-Spoof \
-            Sources/ScreenProtectorKit || echo "SPKit clone failed, skipping"
+- name: Import external sources
+  run: |
+    rm -rf Sources/ESPFF Sources/ScreenProtectorKit
 
+    git clone --depth 1 \
+      https://github.com/Fl0rk/External_ESP_Free_Fire.git \
+      Sources/ESPFF
+
+    git clone --depth 1 \
+      https://github.com/Fl0rk/ScreenProtectorKit-Spoof.git \
+      Sources/ScreenProtectorKit
+
+    echo "=== ESPFF ==="
+    find Sources/ESPFF -type f | sort
+
+    echo "=== ScreenProtectorKit ==="
+    find Sources/ScreenProtectorKit -type f | sort
     - name: Prepare
       run: mkdir -p build
 
