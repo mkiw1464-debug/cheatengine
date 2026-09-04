@@ -18,26 +18,14 @@ jobs:
     runs-on: macos-latest
 
     steps:
-
-      # ─────────────────────────────────────
-      # Checkout
-      # ─────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-
-      # ─────────────────────────────────────
-      # Xcode
-      # ─────────────────────────────────────
       - name: Select Xcode
         run: |
           sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
-
-      # ─────────────────────────────────────
-      # Install Theos
-      # ─────────────────────────────────────
       - name: Install Theos
         run: |
           git clone --recursive \
@@ -56,10 +44,6 @@ jobs:
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
           echo "$HOME/theos/bin" >> "$GITHUB_PATH"
 
-
-      # ─────────────────────────────────────
-      # Install ldid
-      # ─────────────────────────────────────
       - name: Install ldid
         run: |
           brew untap aws/tap 2>/dev/null || true
@@ -67,10 +51,6 @@ jobs:
           which ldid
           ldid --version || true
 
-
-      # ─────────────────────────────────────
-      # Import External ESP
-      # ─────────────────────────────────────
       - name: Import External ESP source
         run: |
           rm -rf Sources/ESPFF
@@ -85,10 +65,6 @@ jobs:
 
           find Sources/ESPFF -type f | sort
 
-
-      # ─────────────────────────────────────
-      # Import ScreenProtectorKit
-      # ─────────────────────────────────────
       - name: Import ScreenProtectorKit source
         run: |
           rm -rf Sources/ScreenProtectorKit
@@ -103,10 +79,27 @@ jobs:
 
           find Sources/ScreenProtectorKit -type f | sort
 
+      - name: Fix Il2CppHelper header
+        run: |
+          set -e
 
-      # ─────────────────────────────────────
-      # Show Project Files
-      # ─────────────────────────────────────
+          echo "======================================"
+          echo "FIXING IL2CPP HEADER"
+          echo "======================================"
+
+          if [ -f "Sources/ll2CppHelper.h" ]; then
+            cp "Sources/ll2CppHelper.h" "Sources/Il2CppHelper.h"
+            echo "Il2CppHelper.h created successfully"
+          else
+            echo "ERROR: Sources/ll2CppHelper.h not found"
+            echo ""
+            echo "Available headers:"
+            find Sources -type f \( -name "*.h" -o -name "*.hpp" \) | sort
+            exit 1
+          fi
+
+          ls -lh Sources/*Il2CppHelper*
+
       - name: Verify project
         run: |
           echo "======================================"
@@ -131,19 +124,11 @@ jobs:
             \) \
             -print | sort
 
-
-      # ─────────────────────────────────────
-      # Prepare
-      # ─────────────────────────────────────
       - name: Prepare
         run: |
           rm -rf build
           mkdir -p build
 
-
-      # ─────────────────────────────────────
-      # Compile
-      # ─────────────────────────────────────
       - name: Compile
         run: |
           set -e
@@ -154,10 +139,10 @@ jobs:
           echo "======================================"
           echo "BUILD INFORMATION"
           echo "======================================"
-
           echo "SDK: $SDK"
           echo "ARCH: $ARCH"
           echo "THEOS: $THEOS"
+          echo "======================================"
 
           CFLAGS="
             -arch $ARCH
@@ -207,27 +192,29 @@ jobs:
           echo "======================================"
 
           file build/ModEngine.dylib
-
-
-      # ─────────────────────────────────────
-      # Sign
-      # ─────────────────────────────────────
-      - name: Sign dylib
-        run: |
-          ldid -S build/ModEngine.dylib
-
-          echo "======================================"
-          echo "SIGN OK"
-          echo "======================================"
-
           ls -lh build/ModEngine.dylib
 
+      - name: Sign dylib
+        run: |
+          set -e
 
-      # ─────────────────────────────────────
-      # Package
-      # ─────────────────────────────────────
+          echo "======================================"
+          echo "SIGNING"
+          echo "======================================"
+
+          ldid -S build/ModEngine.dylib
+
+          echo "SIGN OK"
+          ls -lh build/ModEngine.dylib
+
       - name: Package
         run: |
+          set -e
+
+          echo "======================================"
+          echo "PACKAGING"
+          echo "======================================"
+
           rm -rf Payload
           mkdir -p Payload/ModEngine.app
 
@@ -239,10 +226,8 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
               "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-
           <plist version="1.0">
           <dict>
-
               <key>CFBundleIdentifier</key>
               <string>com.modengine.ff</string>
 
@@ -260,7 +245,6 @@ jobs:
 
               <key>MinimumOSVersion</key>
               <string>13.0</string>
-
           </dict>
           </plist>
           EOF
@@ -269,18 +253,9 @@ jobs:
             ModEngine_OB54.dylib.zip \
             Payload
 
-          echo "======================================"
           echo "PACKAGE OK"
-          echo "======================================"
+          ls -lh ModEngine_OB54.dylib.zip
 
-          ls -lh \
-            build/ModEngine.dylib \
-            ModEngine_OB54.dylib.zip
-
-
-      # ─────────────────────────────────────
-      # Upload Artifact
-      # ─────────────────────────────────────
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -290,10 +265,6 @@ jobs:
             ModEngine_OB54.dylib.zip
           retention-days: 7
 
-
-      # ─────────────────────────────────────
-      # Create GitHub Release
-      # ─────────────────────────────────────
       - name: Create Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
