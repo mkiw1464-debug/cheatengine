@@ -2,122 +2,306 @@ name: Build ModEngine Dylib
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"    # ← fix brew tap trust error
-  HOMEBREW_NO_AUTO_UPDATE: "1"           # ← laju sikit, skip auto update
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+  HOMEBREW_NO_AUTO_UPDATE: "1"
 
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
 
-    - name: Select Xcode
-      run: sudo xcode-select -s /Applications/Xcode.app
+      # ─────────────────────────────────────
+      # Checkout
+      # ─────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install Theos
-      run: |
-        git clone --recursive https://github.com/theos/theos.git $HOME/theos
-        curl -LO https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
-        tar -xf iPhoneOS16.5.sdk.tar.xz -C $HOME/theos/sdks
-        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-        echo "$HOME/theos/bin" >> $GITHUB_PATH
 
-    - name: Install ldid
-      run: |
-        brew untap aws/tap 2>/dev/null || true
-        brew install ldid
-        which ldid
+      # ─────────────────────────────────────
+      # Xcode
+      # ─────────────────────────────────────
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
 
-- name: Import external sources
-  run: |
-    rm -rf Sources/ESPFF Sources/ScreenProtectorKit
 
-    git clone --depth 1 \
-      https://github.com/Fl0rk/External_ESP_Free_Fire.git \
-      Sources/ESPFF
+      # ─────────────────────────────────────
+      # Install Theos
+      # ─────────────────────────────────────
+      - name: Install Theos
+        run: |
+          git clone --recursive \
+            https://github.com/theos/theos.git \
+            "$HOME/theos"
 
-    git clone --depth 1 \
-      https://github.com/Fl0rk/ScreenProtectorKit-Spoof.git \
-      Sources/ScreenProtectorKit
+          mkdir -p "$HOME/theos/sdks"
 
-    echo "=== ESPFF ==="
-    find Sources/ESPFF -type f | sort
+          curl -L \
+            -o iPhoneOS16.5.sdk.tar.xz \
+            https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
 
-    echo "=== ScreenProtectorKit ==="
-    find Sources/ScreenProtectorKit -type f | sort
-    - name: Prepare
-      run: mkdir -p build
+          tar -xf iPhoneOS16.5.sdk.tar.xz \
+            -C "$HOME/theos/sdks"
 
-    - name: Compile
-      run: |
-        SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-        ARCH="arm64"
-        CFLAGS="-arch $ARCH -isysroot $SDK -mios-version-min=13.0 -O2 \
-                -fvisibility=hidden -fPIC \
-                -I$HOME/theos/vendor/include \
-                -ISources -ISources/ESPFF -ISources/ScreenProtectorKit \
-                -DSUBSTRATE_AVAILABLE=1"
-        LDFLAGS="-arch $ARCH -isysroot $SDK \
-                 -dynamiclib -install_name @rpath/ModEngine.dylib \
-                 -framework Foundation -framework UIKit -framework CoreGraphics \
-                 -lsubstrate -L$HOME/theos/vendor/lib"
-        clang++ $CFLAGS -x objective-c++ \
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          echo "$HOME/theos/bin" >> "$GITHUB_PATH"
+
+
+      # ─────────────────────────────────────
+      # Install ldid
+      # ─────────────────────────────────────
+      - name: Install ldid
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install ldid
+          which ldid
+          ldid --version || true
+
+
+      # ─────────────────────────────────────
+      # Import External ESP
+      # ─────────────────────────────────────
+      - name: Import External ESP source
+        run: |
+          rm -rf Sources/ESPFF
+
+          git clone --depth 1 \
+            https://github.com/Fl0rk/External_ESP_Free_Fire.git \
+            Sources/ESPFF
+
+          echo "======================================"
+          echo "ESPFF SOURCE"
+          echo "======================================"
+
+          find Sources/ESPFF -type f | sort
+
+
+      # ─────────────────────────────────────
+      # Import ScreenProtectorKit
+      # ─────────────────────────────────────
+      - name: Import ScreenProtectorKit source
+        run: |
+          rm -rf Sources/ScreenProtectorKit
+
+          git clone --depth 1 \
+            https://github.com/Fl0rk/ScreenProtectorKit-Spoof.git \
+            Sources/ScreenProtectorKit
+
+          echo "======================================"
+          echo "SCREEN PROTECTOR SOURCE"
+          echo "======================================"
+
+          find Sources/ScreenProtectorKit -type f | sort
+
+
+      # ─────────────────────────────────────
+      # Show Project Files
+      # ─────────────────────────────────────
+      - name: Verify project
+        run: |
+          echo "======================================"
+          echo "PROJECT SOURCES"
+          echo "======================================"
+
+          find Sources -maxdepth 2 -type f | sort
+
+          echo ""
+          echo "======================================"
+          echo "ESP SOURCE FILES"
+          echo "======================================"
+
+          find Sources/ESPFF \
+            -type f \
+            \( \
+              -name "*.mm" \
+              -o -name "*.m" \
+              -o -name "*.cpp" \
+              -o -name "*.h" \
+              -o -name "*.hpp" \
+            \) \
+            -print | sort
+
+
+      # ─────────────────────────────────────
+      # Prepare
+      # ─────────────────────────────────────
+      - name: Prepare
+        run: |
+          rm -rf build
+          mkdir -p build
+
+
+      # ─────────────────────────────────────
+      # Compile
+      # ─────────────────────────────────────
+      - name: Compile
+        run: |
+          set -e
+
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          ARCH="arm64"
+
+          echo "======================================"
+          echo "BUILD INFORMATION"
+          echo "======================================"
+
+          echo "SDK: $SDK"
+          echo "ARCH: $ARCH"
+          echo "THEOS: $THEOS"
+
+          CFLAGS="
+            -arch $ARCH
+            -isysroot $SDK
+            -mios-version-min=13.0
+            -O2
+            -fvisibility=hidden
+            -fPIC
+            -I$HOME/theos/vendor/include
+            -ISources
+            -ISources/ESPFF
+            -ISources/ESPFF/headers
+            -ISources/ESPFF/sources
+            -ISources/ESPFF/esp
+            -ISources/ESPFF/esp/Core
+            -ISources/ESPFF/esp/drawing_view
+            -ISources/ScreenProtectorKit
+            -DSUBSTRATE_AVAILABLE=1
+          "
+
+          LDFLAGS="
+            -arch $ARCH
+            -isysroot $SDK
+            -dynamiclib
+            -install_name @rpath/ModEngine.dylib
+            -framework Foundation
+            -framework UIKit
+            -framework CoreGraphics
+            -lsubstrate
+            -L$HOME/theos/vendor/lib
+          "
+
+          echo "======================================"
+          echo "COMPILING"
+          echo "======================================"
+
+          clang++ $CFLAGS \
+            -x objective-c++ \
             Sources/ModEngine.mm \
             Sources/MenuView.mm \
-            Sources/ESPFF/ESPFF.mm \
             $LDFLAGS \
             -o build/ModEngine.dylib
-        echo "Build OK"
 
-    - name: Fake-sign
-      run: ldid -S build/ModEngine.dylib || true
+          echo ""
+          echo "======================================"
+          echo "BUILD OK"
+          echo "======================================"
 
-    - name: Package
-      run: |
-        mkdir -p Payload/ModEngine.app
-        cp build/ModEngine.dylib Payload/ModEngine.app/
-        cat > Payload/ModEngine.app/Info.plist << 'EOF'
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0"><dict>
-            <key>CFBundleIdentifier</key><string>com.modengine.ff</string>
-            <key>CFBundleName</key><string>ModEngine</string>
-            <key>CFBundleExecutable</key><string>ModEngine</string>
-            <key>CFBundleVersion</key><string>1</string>
-            <key>CFBundleShortVersionString</key><string>1.0</string>
-            <key>MinimumOSVersion</key><string>13.0</string>
-        </dict></plist>
-        EOF
-        zip -qr ModEngine.zip Payload
-        mv ModEngine.zip ModEngine_OB54.dylib.zip
+          file build/ModEngine.dylib
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ModEngine-OB54
-        path: |
-          build/ModEngine.dylib
-          ModEngine_OB54.dylib.zip
-        retention-days: 7
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      if: github.ref == 'refs/heads/main'
-      with:
-        tag_name: "OB54-${{ github.run_number }}"
-        name: "ModEngine OB54 Build ${{ github.run_number }}"
-        files: |
-          build/ModEngine.dylib
-          ModEngine_OB54.dylib.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # ─────────────────────────────────────
+      # Sign
+      # ─────────────────────────────────────
+      - name: Sign dylib
+        run: |
+          ldid -S build/ModEngine.dylib
+
+          echo "======================================"
+          echo "SIGN OK"
+          echo "======================================"
+
+          ls -lh build/ModEngine.dylib
+
+
+      # ─────────────────────────────────────
+      # Package
+      # ─────────────────────────────────────
+      - name: Package
+        run: |
+          rm -rf Payload
+          mkdir -p Payload/ModEngine.app
+
+          cp \
+            build/ModEngine.dylib \
+            Payload/ModEngine.app/ModEngine.dylib
+
+          cat > Payload/ModEngine.app/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+              "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
+          <plist version="1.0">
+          <dict>
+
+              <key>CFBundleIdentifier</key>
+              <string>com.modengine.ff</string>
+
+              <key>CFBundleName</key>
+              <string>ModEngine</string>
+
+              <key>CFBundleExecutable</key>
+              <string>ModEngine</string>
+
+              <key>CFBundleVersion</key>
+              <string>1</string>
+
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+
+              <key>MinimumOSVersion</key>
+              <string>13.0</string>
+
+          </dict>
+          </plist>
+          EOF
+
+          zip -qr \
+            ModEngine_OB54.dylib.zip \
+            Payload
+
+          echo "======================================"
+          echo "PACKAGE OK"
+          echo "======================================"
+
+          ls -lh \
+            build/ModEngine.dylib \
+            ModEngine_OB54.dylib.zip
+
+
+      # ─────────────────────────────────────
+      # Upload Artifact
+      # ─────────────────────────────────────
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModEngine-OB54
+          path: |
+            build/ModEngine.dylib
+            ModEngine_OB54.dylib.zip
+          retention-days: 7
+
+
+      # ─────────────────────────────────────
+      # Create GitHub Release
+      # ─────────────────────────────────────
+      - name: Create Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "OB54-${{ github.run_number }}"
+          name: "ModEngine OB54 Build ${{ github.run_number }}"
+          files: |
+            build/ModEngine.dylib
+            ModEngine_OB54.dylib.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
