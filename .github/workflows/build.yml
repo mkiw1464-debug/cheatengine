@@ -16,24 +16,30 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Clone ESPFF + ScreenProtectorKit
+        run: |
+          git clone https://github.com/Fl0rk/External_ESP_Free_Fire Sources/ESPFF
+          git clone https://github.com/Fl0rk/ScreenProtectorKit-Spoof Sources/ScreenProtectorKit
+
       - name: Install Theos
         env:
           THEOS: /Users/runner/theos
-          # tambah GH token biar API call theos installer ga kena rate limit
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           export THEOS=/Users/runner/theos
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" || true
 
-      - name: Install iOS SDK manually
+      - name: Symlink Xcode iOS SDK ke Theos
         run: |
           set -e
-          # kalau installer gagal download SDK, kita manual
-          SDK_URL="https://github.com/theos/sdks/releases/download/2024/iPhoneOS17.5.sdk.tar.xz"
           mkdir -p /Users/runner/theos/sdks
-          curl -L "$SDK_URL" -o /tmp/sdk.tar.xz
-          tar -xf /tmp/sdk.tar.xz -C /Users/runner/theos/sdks/
+
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          SDK_NAME=$(basename $SDK_PATH)
+
+          echo "SDK found: $SDK_PATH"
+          ln -sf "$SDK_PATH" "/Users/runner/theos/sdks/$SDK_NAME"
           ls /Users/runner/theos/sdks/
 
       - name: Set env
@@ -42,12 +48,12 @@ jobs:
 
       - name: Verify setup
         run: |
+          echo "=== Source tree ==="
+          find Sources -maxdepth 3 -type f -name "*.mm" -o -name "*.h" | head -40
           echo "=== SDKs ==="
           ls $THEOS/sdks/
           echo "=== Substrate ==="
-          ls $THEOS/vendor/lib/ | grep -i sub
-          echo "=== Xcode SDK ==="
-          xcrun --sdk iphoneos --show-sdk-path
+          ls $THEOS/vendor/lib/ | grep -i sub || echo "MISSING substrate"
 
       - name: Build dylib
         run: |
@@ -56,19 +62,17 @@ jobs:
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           ARCH="arm64"
 
-          # Resolve substrate inc
           SUBSTRATE_INC=""
           if [ -d "$THEOS/vendor/include/CydiaSubstrate" ]; then
             SUBSTRATE_INC="-I$THEOS/vendor/include/CydiaSubstrate"
           fi
 
-          # Resolve substrate lib
           if ls $THEOS/vendor/lib/libsubstrate.* 1>/dev/null 2>&1; then
             SUBSTRATE_LIB="-lsubstrate"
           elif ls $THEOS/vendor/lib/libsubstitute.* 1>/dev/null 2>&1; then
             SUBSTRATE_LIB="-lsubstitute"
           else
-            echo "[ERROR] No substrate lib"
+            echo "[ERROR] No substrate lib found"
             ls $THEOS/vendor/lib/
             exit 1
           fi
