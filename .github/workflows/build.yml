@@ -1,0 +1,116 @@
+name: Build ModEngine
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Theos
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+
+      - name: Set THEOS env
+        run: |
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Verify Theos install
+        run: |
+          echo "=== Substrate libs ==="
+          ls $HOME/theos/vendor/lib/ | grep -i "sub" || echo "MISSING"
+          echo "=== Substrate headers ==="
+          find $HOME/theos/vendor/include -name "substrate.h" 2>/dev/null || echo "MISSING"
+          echo "=== SDK ==="
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Build dylib
+        run: |
+          set -e
+
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          ARCH="arm64"
+
+          # Resolve substrate header
+          SUBSTRATE_INC=""
+          if [ -d "$HOME/theos/vendor/include/CydiaSubstrate" ]; then
+            SUBSTRATE_INC="-I$HOME/theos/vendor/include/CydiaSubstrate"
+          fi
+
+          # Resolve substrate lib
+          if ls $HOME/theos/vendor/lib/libsubstrate.* 1>/dev/null 2>&1; then
+            SUBSTRATE_LIB="-lsubstrate"
+          elif ls $HOME/theos/vendor/lib/libsubstitute.* 1>/dev/null 2>&1; then
+            SUBSTRATE_LIB="-lsubstitute"
+          else
+            echo "[ERROR] No substrate lib found"
+            ls $HOME/theos/vendor/lib/
+            exit 1
+          fi
+
+          CFLAGS="
+            -arch $ARCH
+            -isysroot $SDK
+            -mios-version-min=13.0
+            -std=c++17
+            -O2
+            -fvisibility=hidden
+            -fPIC
+            -I$HOME/theos/vendor/include
+            $SUBSTRATE_INC
+            -ISources
+            -ISources/ESPFF
+            -ISources/ESPFF/headers
+            -ISources/ESPFF/sources
+            -ISources/ESPFF/esp
+            -ISources/ESPFF/esp/Core
+            -ISources/ESPFF/esp/drawing_view
+            -ISources/ScreenProtectorKit
+            -DSUBSTRATE_AVAILABLE=1
+          "
+
+          LDFLAGS="
+            -arch $ARCH
+            -isysroot $SDK
+            -dynamiclib
+            -install_name @rpath/ModEngine.dylib
+            -framework Foundation
+            -framework UIKit
+            -framework CoreGraphics
+            $SUBSTRATE_LIB
+            -L$HOME/theos/vendor/lib
+          "
+
+          mkdir -p build
+
+          echo "======================================"
+          echo "COMPILING"
+          echo "======================================"
+
+          clang++ $CFLAGS \
+            -x objective-c++ \
+            Sources/ModEngine.mm \
+            Sources/MenuView.mm \
+            $LDFLAGS \
+            -o build/ModEngine.dylib
+
+          echo "======================================"
+          echo "BUILD OK"
+          echo "======================================"
+          file build/ModEngine.dylib
+          ls -lh build/ModEngine.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModEngine
+          path: build/ModEngine.dylib
