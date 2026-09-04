@@ -17,20 +17,36 @@ jobs:
           submodules: recursive
 
       - name: Install Theos
+        env:
+          THEOS: /Users/runner/theos
+          # tambah GH token biar API call theos installer ga kena rate limit
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
+          export THEOS=/Users/runner/theos
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
 
-      - name: Set THEOS env
+      - name: Install iOS SDK manually
         run: |
-          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+          set -e
+          # kalau installer gagal download SDK, kita manual
+          SDK_URL="https://github.com/theos/sdks/releases/download/2024/iPhoneOS17.5.sdk.tar.xz"
+          mkdir -p /Users/runner/theos/sdks
+          curl -L "$SDK_URL" -o /tmp/sdk.tar.xz
+          tar -xf /tmp/sdk.tar.xz -C /Users/runner/theos/sdks/
+          ls /Users/runner/theos/sdks/
 
-      - name: Verify Theos install
+      - name: Set env
         run: |
-          echo "=== Substrate libs ==="
-          ls $HOME/theos/vendor/lib/ | grep -i "sub" || echo "MISSING"
-          echo "=== Substrate headers ==="
-          find $HOME/theos/vendor/include -name "substrate.h" 2>/dev/null || echo "MISSING"
-          echo "=== SDK ==="
+          echo "THEOS=/Users/runner/theos" >> $GITHUB_ENV
+
+      - name: Verify setup
+        run: |
+          echo "=== SDKs ==="
+          ls $THEOS/sdks/
+          echo "=== Substrate ==="
+          ls $THEOS/vendor/lib/ | grep -i sub
+          echo "=== Xcode SDK ==="
           xcrun --sdk iphoneos --show-sdk-path
 
       - name: Build dylib
@@ -40,20 +56,20 @@ jobs:
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           ARCH="arm64"
 
-          # Resolve substrate header
+          # Resolve substrate inc
           SUBSTRATE_INC=""
-          if [ -d "$HOME/theos/vendor/include/CydiaSubstrate" ]; then
-            SUBSTRATE_INC="-I$HOME/theos/vendor/include/CydiaSubstrate"
+          if [ -d "$THEOS/vendor/include/CydiaSubstrate" ]; then
+            SUBSTRATE_INC="-I$THEOS/vendor/include/CydiaSubstrate"
           fi
 
           # Resolve substrate lib
-          if ls $HOME/theos/vendor/lib/libsubstrate.* 1>/dev/null 2>&1; then
+          if ls $THEOS/vendor/lib/libsubstrate.* 1>/dev/null 2>&1; then
             SUBSTRATE_LIB="-lsubstrate"
-          elif ls $HOME/theos/vendor/lib/libsubstitute.* 1>/dev/null 2>&1; then
+          elif ls $THEOS/vendor/lib/libsubstitute.* 1>/dev/null 2>&1; then
             SUBSTRATE_LIB="-lsubstitute"
           else
-            echo "[ERROR] No substrate lib found"
-            ls $HOME/theos/vendor/lib/
+            echo "[ERROR] No substrate lib"
+            ls $THEOS/vendor/lib/
             exit 1
           fi
 
@@ -65,7 +81,7 @@ jobs:
             -O2
             -fvisibility=hidden
             -fPIC
-            -I$HOME/theos/vendor/include
+            -I$THEOS/vendor/include
             $SUBSTRATE_INC
             -ISources
             -ISources/ESPFF
@@ -87,14 +103,10 @@ jobs:
             -framework UIKit
             -framework CoreGraphics
             $SUBSTRATE_LIB
-            -L$HOME/theos/vendor/lib
+            -L$THEOS/vendor/lib
           "
 
           mkdir -p build
-
-          echo "======================================"
-          echo "COMPILING"
-          echo "======================================"
 
           clang++ $CFLAGS \
             -x objective-c++ \
