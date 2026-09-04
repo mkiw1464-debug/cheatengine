@@ -1,278 +1,78 @@
-name: Build ModEngine Dylib
+#!/bin/bash
+set -e
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+ARCH="arm64"
 
-permissions:
-  contents: write
+echo "======================================"
+echo "BUILD INFORMATION"
+echo "======================================"
+echo "SDK:   $SDK"
+echo "ARCH:  $ARCH"
+echo "THEOS: $THEOS"
+echo "======================================"
 
-env:
-  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
-  HOMEBREW_NO_AUTO_UPDATE: "1"
+# ── Resolve substrate header path ────────────────────────
+# Check which layout theos vendor is using
+SUBSTRATE_INC=""
+if [ -d "$HOME/theos/vendor/include/CydiaSubstrate" ]; then
+    SUBSTRATE_INC="-I$HOME/theos/vendor/include/CydiaSubstrate"
+elif [ -f "$HOME/theos/vendor/include/substrate.h" ]; then
+    SUBSTRATE_INC=""   # already covered by -I$HOME/theos/vendor/include
+else
+    echo "[WARN] Substrate headers not found under theos/vendor/include"
+fi
 
-jobs:
-  build:
-    runs-on: macos-latest
+CFLAGS="
+  -arch $ARCH
+  -isysroot $SDK
+  -mios-version-min=13.0
+  -std=c++17
+  -O2
+  -fvisibility=hidden
+  -fPIC
+  -I$HOME/theos/vendor/include
+  $SUBSTRATE_INC
+  -ISources
+  -ISources/ESPFF
+  -ISources/ESPFF/headers
+  -ISources/ESPFF/sources
+  -ISources/ESPFF/esp
+  -ISources/ESPFF/esp/Core
+  -ISources/ESPFF/esp/drawing_view
+  -ISources/ScreenProtectorKit
+  -DSUBSTRATE_AVAILABLE=1
+"
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+LDFLAGS="
+  -arch $ARCH
+  -isysroot $SDK
+  -dynamiclib
+  -install_name @rpath/ModEngine.dylib
+  -framework Foundation
+  -framework UIKit
+  -framework CoreGraphics
+  -lsubstrate
+  -L$HOME/theos/vendor/lib
+"
 
-      - name: Select Xcode
-        run: |
-          sudo xcode-select -s /Applications/Xcode.app
-          xcodebuild -version
+mkdir -p build
 
-      - name: Install Theos
-        run: |
-          git clone --recursive \
-            https://github.com/theos/theos.git \
-            "$HOME/theos"
+echo "======================================"
+echo "COMPILING"
+echo "======================================"
 
-          mkdir -p "$HOME/theos/sdks"
+clang++ $CFLAGS \
+  -x objective-c++ \
+  Sources/ModEngine.mm \
+  Sources/MenuView.mm \
+  $LDFLAGS \
+  -o build/ModEngine.dylib
 
-          curl -L \
-            -o iPhoneOS16.5.sdk.tar.xz \
-            https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
+echo ""
+echo "======================================"
+echo "BUILD OK"
+echo "======================================"
 
-          tar -xf iPhoneOS16.5.sdk.tar.xz \
-            -C "$HOME/theos/sdks"
-
-          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
-          echo "$HOME/theos/bin" >> "$GITHUB_PATH"
-
-      - name: Install ldid
-        run: |
-          brew untap aws/tap 2>/dev/null || true
-          brew install ldid
-          which ldid
-          ldid --version || true
-
-      - name: Import External ESP source
-        run: |
-          rm -rf Sources/ESPFF
-
-          git clone --depth 1 \
-            https://github.com/Fl0rk/External_ESP_Free_Fire.git \
-            Sources/ESPFF
-
-          echo "======================================"
-          echo "ESPFF SOURCE"
-          echo "======================================"
-
-          find Sources/ESPFF -type f | sort
-
-      - name: Import ScreenProtectorKit source
-        run: |
-          rm -rf Sources/ScreenProtectorKit
-
-          git clone --depth 1 \
-            https://github.com/Fl0rk/ScreenProtectorKit-Spoof.git \
-            Sources/ScreenProtectorKit
-
-          echo "======================================"
-          echo "SCREEN PROTECTOR SOURCE"
-          echo "======================================"
-
-          find Sources/ScreenProtectorKit -type f | sort
-
-      - name: Fix Il2CppHelper header
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "FIXING IL2CPP HEADER"
-          echo "======================================"
-
-          if [ -f "Sources/ll2CppHelper.h" ]; then
-            cp "Sources/ll2CppHelper.h" "Sources/Il2CppHelper.h"
-            echo "Il2CppHelper.h created successfully"
-          else
-            echo "ERROR: Sources/ll2CppHelper.h not found"
-            echo ""
-            echo "Available headers:"
-            find Sources -type f \( -name "*.h" -o -name "*.hpp" \) | sort
-            exit 1
-          fi
-
-          ls -lh Sources/*Il2CppHelper*
-
-      - name: Verify project
-        run: |
-          echo "======================================"
-          echo "PROJECT SOURCES"
-          echo "======================================"
-
-          find Sources -maxdepth 2 -type f | sort
-
-          echo ""
-          echo "======================================"
-          echo "ESP SOURCE FILES"
-          echo "======================================"
-
-          find Sources/ESPFF \
-            -type f \
-            \( \
-              -name "*.mm" \
-              -o -name "*.m" \
-              -o -name "*.cpp" \
-              -o -name "*.h" \
-              -o -name "*.hpp" \
-            \) \
-            -print | sort
-
-      - name: Prepare
-        run: |
-          rm -rf build
-          mkdir -p build
-
-      - name: Compile
-        run: |
-          set -e
-
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          ARCH="arm64"
-
-          echo "======================================"
-          echo "BUILD INFORMATION"
-          echo "======================================"
-          echo "SDK: $SDK"
-          echo "ARCH: $ARCH"
-          echo "THEOS: $THEOS"
-          echo "======================================"
-
-          CFLAGS="
-            -arch $ARCH
-            -isysroot $SDK
-            -mios-version-min=13.0
-            -O2
-            -fvisibility=hidden
-            -fPIC
-            -I$HOME/theos/vendor/include
-            -ISources
-            -ISources/ESPFF
-            -ISources/ESPFF/headers
-            -ISources/ESPFF/sources
-            -ISources/ESPFF/esp
-            -ISources/ESPFF/esp/Core
-            -ISources/ESPFF/esp/drawing_view
-            -ISources/ScreenProtectorKit
-            -DSUBSTRATE_AVAILABLE=1
-          "
-
-          LDFLAGS="
-            -arch $ARCH
-            -isysroot $SDK
-            -dynamiclib
-            -install_name @rpath/ModEngine.dylib
-            -framework Foundation
-            -framework UIKit
-            -framework CoreGraphics
-            -lsubstrate
-            -L$HOME/theos/vendor/lib
-          "
-
-          echo "======================================"
-          echo "COMPILING"
-          echo "======================================"
-
-          clang++ $CFLAGS \
-            -x objective-c++ \
-            Sources/ModEngine.mm \
-            Sources/MenuView.mm \
-            $LDFLAGS \
-            -o build/ModEngine.dylib
-
-          echo ""
-          echo "======================================"
-          echo "BUILD OK"
-          echo "======================================"
-
-          file build/ModEngine.dylib
-          ls -lh build/ModEngine.dylib
-
-      - name: Sign dylib
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "SIGNING"
-          echo "======================================"
-
-          ldid -S build/ModEngine.dylib
-
-          echo "SIGN OK"
-          ls -lh build/ModEngine.dylib
-
-      - name: Package
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "PACKAGING"
-          echo "======================================"
-
-          rm -rf Payload
-          mkdir -p Payload/ModEngine.app
-
-          cp \
-            build/ModEngine.dylib \
-            Payload/ModEngine.app/ModEngine.dylib
-
-          cat > Payload/ModEngine.app/Info.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-              "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleIdentifier</key>
-              <string>com.modengine.ff</string>
-
-              <key>CFBundleName</key>
-              <string>ModEngine</string>
-
-              <key>CFBundleExecutable</key>
-              <string>ModEngine</string>
-
-              <key>CFBundleVersion</key>
-              <string>1</string>
-
-              <key>CFBundleShortVersionString</key>
-              <string>1.0</string>
-
-              <key>MinimumOSVersion</key>
-              <string>13.0</string>
-          </dict>
-          </plist>
-          EOF
-
-          zip -qr \
-            ModEngine_OB54.dylib.zip \
-            Payload
-
-          echo "PACKAGE OK"
-          ls -lh ModEngine_OB54.dylib.zip
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ModEngine-OB54
-          path: |
-            build/ModEngine.dylib
-            ModEngine_OB54.dylib.zip
-          retention-days: 7
-
-      - name: Create Release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: "OB54-${{ github.run_number }}"
-          name: "ModEngine OB54 Build ${{ github.run_number }}"
-          files: |
-            build/ModEngine.dylib
-            ModEngine_OB54.dylib.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+file build/ModEngine.dylib
+ls -lh build/ModEngine.dylib
