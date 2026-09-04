@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write        # ← penting untuk release
+  contents: write
+
+env:
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"    # ← fix brew tap trust error
+  HOMEBREW_NO_AUTO_UPDATE: "1"           # ← laju sikit, skip auto update
 
 jobs:
   build:
@@ -19,7 +23,7 @@ jobs:
     - name: Select Xcode
       run: sudo xcode-select -s /Applications/Xcode.app
 
-    - name: Install Theos        # ← FIX: guna git clone, bukan install script
+    - name: Install Theos
       run: |
         git clone --recursive https://github.com/theos/theos.git $HOME/theos
         curl -LO https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
@@ -28,14 +32,17 @@ jobs:
         echo "$HOME/theos/bin" >> $GITHUB_PATH
 
     - name: Install ldid
-      run: brew install ldid || true
+      run: |
+        brew untap aws/tap 2>/dev/null || true
+        brew install ldid
+        which ldid
 
     - name: Clone ESPFF source
       run: |
         git clone --depth 1 https://github.com/Fl0rk/External_ESP_Free_Fire \
-            Sources/ESPFF
+            Sources/ESPFF || echo "ESPFF clone failed, skipping"
         git clone --depth 1 https://github.com/Fl0rk/ScreenProtectorKit-Spoof \
-            Sources/ScreenProtectorKit
+            Sources/ScreenProtectorKit || echo "SPKit clone failed, skipping"
 
     - name: Prepare
       run: mkdir -p build
@@ -103,4 +110,4 @@ jobs:
           build/ModEngine.dylib
           ModEngine_OB54.dylib.zip
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ← FIX: token untuk release
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
